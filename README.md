@@ -14,6 +14,6 @@ Insert problem description
 
 ## Getting Started
 
-- [] Obtain dataset
-- [] Spinning up system
-- [] Usage
+- [ ] Obtain dataset
+- [ ] Spinning up system
+- [ ] Usage
