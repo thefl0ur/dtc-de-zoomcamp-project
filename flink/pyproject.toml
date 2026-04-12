@@ -1,0 +1,6 @@
+[project]
+name = "flink"
+version = "0.0.1"
+dependencies = [
+    "apache-flink==2.2.0",
+]

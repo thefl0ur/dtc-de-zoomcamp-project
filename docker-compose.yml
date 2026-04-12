@@ -10,6 +10,7 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - minio_data:/data
+
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v25.3.9
     restart: always
@@ -26,6 +27,42 @@ services:
       - "9092:9092"
       - "8082:8082"
 
+  jobmanager:
+    build: ./flink
+    pull_policy: never
+    volumes:
+      - ./flink/src/:/opt/src
+      - ./flink/flink-config.yaml:/opt/flink/conf/config.yaml
+    ports:
+      - "8081:8081"
+    expose:
+      - "6123"
+    command: jobmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        jobmanager.memory.process.size: 800m
+
+  taskmanager:
+    build: ./flink
+    pull_policy: never
+    volumes:
+      - ./flink/src/:/opt/src
+      - ./flink/flink-config.yaml:/opt/flink/conf/config.yaml
+    depends_on:
+      - jobmanager
+    expose:
+      - "6121"
+      - "6122"
+    command: taskmanager
+    environment:
+      - |
+        FLINK_PROPERTIES=
+        jobmanager.rpc.address: jobmanager
+        taskmanager.memory.process.size: 800m
+        taskmanager.numberOfTaskSlots: 2
+        parallelism.default: 1
+
 volumes:
-  garage_data:
   minio_data:
