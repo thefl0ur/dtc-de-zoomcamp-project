@@ -64,5 +64,20 @@ services:
         taskmanager.numberOfTaskSlots: 2
         parallelism.default: 1
 
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./dashboard/src:/app/src
+    depends_on:
+      - minio
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      BACKEND: s3
+      DATA_SOURCE: read_json_auto('s3://llm-raw/**/*.json')
+
 volumes:
   minio_data:
