@@ -70,6 +70,7 @@ services:
       - "8501:8501"
     volumes:
       - ./dashboard/src:/app/src
+      - ./warehouse:/app/warehouse
     depends_on:
       - minio
     environment:
