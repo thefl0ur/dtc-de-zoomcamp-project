@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+import os
 
 from pyflink.common import Duration, Types, WatermarkStrategy
 from pyflink.common.serialization import Encoder, SimpleStringSchema
@@ -12,15 +13,14 @@ from pyflink.datastream.connectors.file_system import BucketAssigner
 from pyflink.datastream.connectors.file_system import FileSink#, DateBucketAssigner
 from pyflink.java_gateway import get_gateway
 
-REDPANDA_BROKERS = "redpanda:29092"
-TOPIC = "interactions"
-MINIO_RAW = "s3://llm-raw/interactions/"
-MINIO_PROCESSED = "s3://llm-processed/interactions/"
-MINIO_WINDOWS = "s3://llm-processed/failure_windows/"
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+BROKER = os.environ.get("BROKER")
+TOPIC = os.environ.get("TOPIC")
+
+BUCKET_RAW = f's3://{os.environ.get("RAW_BUCKET")}/interactions/'
+BUCKET_PROCESSED = f's3://{os.environ.get("PROCESSED_BUCKET")}/interactions/'
+BUCKET_WINDOWS = f's3://{os.environ.get("PROCESSED_BUCKET")}/failure_windows/'
+
 
 def classify_severity(row: dict) -> dict:
     if not row["is_failure"]:
@@ -75,9 +75,11 @@ env = StreamExecutionEnvironment.get_execution_environment()
 env.enable_checkpointing(30_000)
 env.set_parallelism(1)
 
+env.get_checkpoint_config()
+
 source = (
     KafkaSource.builder()
-    .set_bootstrap_servers(REDPANDA_BROKERS)
+    .set_bootstrap_servers(BROKER)
     .set_topics(TOPIC)
     .set_group_id("flink-enriched-sink")
     .set_starting_offsets(KafkaOffsetsInitializer.earliest())
@@ -97,7 +99,7 @@ raw_stream = env.from_source(
 )
 
 # keep raw stream writing to llm-raw unchanged
-raw_stream.sink_to(make_file_sink(MINIO_RAW, "interactions"))
+raw_stream.sink_to(make_file_sink(BUCKET_RAW, "interactions"))
 
 # enrich
 enriched_stream = raw_stream.map(
@@ -105,7 +107,7 @@ enriched_stream = raw_stream.map(
     output_type=Types.STRING(),
 )
 
-enriched_stream.sink_to(make_file_sink(MINIO_PROCESSED, "interactions"))
+enriched_stream.sink_to(make_file_sink(BUCKET_PROCESSED, "interactions"))
 
 # 5-min tumbling window failure rate per model
 def to_window_row(msg: str) -> str:
@@ -118,15 +120,36 @@ def to_window_row(msg: str) -> str:
     })
 
 
-class FailureRateWindowFunction:
-    def open(self, runtime_context):
-        pass
+# class FailureRateWindowFunction:
+#     def open(self, runtime_context):
+#         pass
 
-    def apply(self, key, window, inputs):
+#     def apply(self, key, window, inputs):
+#         rows = list(inputs)
+#         total = len(rows)
+#         failures = sum(1 for r in rows if json.loads(r)["is_failure"])
+#         result = json.dumps({
+#             "window_start": str(window.start),
+#             "window_end": str(window.end),
+#             "model_name": key[0],
+#             "model_provider": key[1],
+#             "total": total,
+#             "failures": failures,
+#             "failure_rate": round(failures / total, 3) if total else 0.0,
+#         })
+#         yield result
+
+
+from pyflink.datastream.functions import WindowFunction
+from pyflink.datastream.window import TimeWindow
+from typing import Iterable
+
+class FailureRateWindowFunction(WindowFunction):
+    def apply(self, key, window: TimeWindow, inputs: Iterable):
         rows = list(inputs)
         total = len(rows)
         failures = sum(1 for r in rows if json.loads(r)["is_failure"])
-        result = json.dumps({
+        yield json.dumps({
             "window_start": str(window.start),
             "window_end": str(window.end),
             "model_name": key[0],
@@ -135,7 +158,6 @@ class FailureRateWindowFunction:
             "failures": failures,
             "failure_rate": round(failures / total, 3) if total else 0.0,
         })
-        yield result
 
 from pyflink.common.time import Time
 (
@@ -149,8 +171,9 @@ from pyflink.common.time import Time
 
     .window(TumblingEventTimeWindows.of(Time.minutes(5)))
     # .window(TumblingEventTimeWindows.of(Duration.of_minutes(5)))
-    .apply(FailureRateWindowFunction())
-    .sink_to(make_file_sink(MINIO_WINDOWS, "window"))
+    # .apply(FailureRateWindowFunction())
+    .apply(FailureRateWindowFunction(), output_type=Types.STRING())
+    .sink_to(make_file_sink(BUCKET_WINDOWS, "window"))
 )
 
 env.execute("enriched-sink")

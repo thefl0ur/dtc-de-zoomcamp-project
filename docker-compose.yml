@@ -38,6 +38,7 @@ services:
     expose:
       - "6123"
     command: jobmanager
+    env_file: .env
     environment:
       - |
         FLINK_PROPERTIES=
@@ -56,6 +57,7 @@ services:
       - "6121"
       - "6122"
     command: taskmanager
+    env_file: .env
     environment:
       - |
         FLINK_PROPERTIES=
