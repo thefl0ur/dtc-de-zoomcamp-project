@@ -3,14 +3,12 @@ from pathlib import Path
 import duckdb
 import streamlit as st
 
-MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "minio:9000")
-MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT")
+MINIO_USER = os.environ.get("MINIO_ROOT_USER")
+MINIO_SECRET_KEY = os.environ.get("MINIO_ROOT_PASSWORD")
+DATA_SOURCE = os.environ.get("DATA_SOURCE")
 
-DATA_SOURCE = os.environ.get("DATA_SOURCE", "read_json_auto('s3://llm-raw/**/*.json')")
-BACKEND = os.environ.get("BACKEND", "s3")
 WAREHOUSE = Path("/app/warehouse")
-
 MODELS = [
     "interactions.sql",
     "failure_by_model.sql",
@@ -20,22 +18,21 @@ MODELS = [
 @st.cache_resource
 def get_connection():
     con = duckdb.connect()
-    if BACKEND == "s3":
-        con.execute("INSTALL httpfs; LOAD httpfs;")
-        con.execute(f"""
-            SET s3_endpoint='{MINIO_ENDPOINT}';
-            SET s3_access_key_id='{MINIO_ACCESS_KEY}';
-            SET s3_secret_access_key='{MINIO_SECRET_KEY}';
-            SET s3_use_ssl=false;
-            SET s3_url_style='path';
-        """)
-        for filename in MODELS:
-            sql = (WAREHOUSE / filename).read_text()
+    con.execute("INSTALL httpfs; LOAD httpfs;")
+    con.execute(f"""
+        SET s3_endpoint='{MINIO_ENDPOINT}';
+        SET s3_access_key_id='{MINIO_USER}';
+        SET s3_secret_access_key='{MINIO_SECRET_KEY}';
+        SET s3_use_ssl=false;
+        SET s3_url_style='path';
+    """)
+    for filename in MODELS:
+        sql = (WAREHOUSE / filename).read_text()
+        try:
             con.execute(sql)
+        except Exception as e:
+            st.warning(f"View {filename} not ready yet: {e}")
             
-    elif BACKEND == "bigquery":
-        con.execute("INSTALL bigquery FROM community; LOAD bigquery;")
-    # config from env vars
     return con
 
 def load_data(con):
@@ -50,20 +47,32 @@ def query(con: duckdb.DuckDBPyConnection, sql: str):
     return con.execute(sql).fetchdf()
 
 try:
-    # --- status row ---
     total = query(con, "SELECT COUNT(*) AS n FROM interactions").iloc[0]["n"]
     last = query(con, "SELECT MAX(timestamp_utc) AS t FROM interactions").iloc[0]["t"]
     st.caption(f"Total interactions: {total} | Last event: {last}")
+except Exception as e:
+    st.info(f"Waiting for data...")
 
-    # Tile 1 — placeholder: failures by model
+try:
     st.subheader("Failure breakdown by model")
     df_model = query(con, "SELECT * FROM failure_by_model WHERE failures > 0")
-    st.bar_chart(df_model, x="model_name", y="total", color="severity")
+    if df_model.empty:
+        st.info("No failure data yet — waiting for Flink to process events.")
+    else:
+        st.bar_chart(df_model, x="model_name", y="total", color="severity")
+except Exception as e:
+    st.info(f"Waiting for data...")
 
-    # Tile 2 — placeholder: events over time
+try:
     st.subheader("Failure rate over time")
     df_time = query(con, "SELECT * FROM failure_timeline")
-    st.line_chart(df_time, x="hour", y=["failure_rate", "hallucinations", "safety_blocks", "latency_timeouts"])
-
+    if df_time.empty:
+        st.info("No window data yet — waiting for Flink to process events.")
+    else:
+        st.line_chart(
+            df_time.pivot(index="window_time", columns="model_name", values="failure_rate"),
+            x_label="Time",
+            y_label="Failure rate",
+        )
 except Exception as e:
-    st.error(f"Could not load data: {e}")
+    st.info(f"Waiting for data...")
