@@ -1,14 +1,16 @@
 blob:
   server:
-    port: '6124'
+    port: "6124"
+
 taskmanager:
   memory:
     process:
       size: 1728m
     jvm-metaspace:
-      size: 512m  # added for PyFlink
+      size: 512m
   bind-host: 0.0.0.0
   numberOfTaskSlots: 1
+
 jobmanager:
   execution:
     failover-strategy: region
@@ -19,13 +21,17 @@ jobmanager:
     process:
       size: 800m
   bind-host: 0.0.0.0
+
 query:
   server:
-    port: '6125'
+    port: "6125"
+
 parallelism:
   default: 1
+
 rest:
   address: 0.0.0.0
+
 env:
   java:
     opts:
@@ -44,7 +50,8 @@ env:
         --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
         --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
         --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED
-s3.endpoint: http://minio:9000
-s3.access-key: minioadmin
-s3.secret-key: minioadmin
+
+s3.endpoint: "http://${minio_endpoint}"
+s3.access-key: "${minio_user}"
+s3.secret-key: "${minio_password}"
 s3.path.style.access: "true"
