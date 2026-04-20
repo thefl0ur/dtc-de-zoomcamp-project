@@ -3,6 +3,7 @@ name = "producer"
 version = "0.0.1"
 dependencies = [
     "kafka-python>=2.3.0",
+    "pydantic-settings>=2.13.1",
     "shared",
 ]
 
